@@ -67,27 +67,34 @@ def _filled_rects(page: fitz.Page) -> list[tuple[fitz.Rect, tuple]]:
     return out
 
 
-def _background_is_light(span_rect: fitz.Rect, fills: list[tuple[fitz.Rect, tuple]],
-                         cover_ratio: float) -> bool:
-    """True if the surface behind this text is light (so white text would truly vanish).
+def _background_is_light(page: fitz.Page, span_rect: fitz.Rect) -> bool:
+    """True if the surface actually rendered behind this text is light.
 
-    Finds the fill that covers the most of the span. If nothing meaningful covers it,
-    the background is the white page -> light. If a coloured/dark fill sits behind it
-    (a table header, a chart bar), the text is readable -> not light.
+    Renders just the span's region and samples pixels. Because the candidate text
+    is white, on a truly light background almost every pixel is light; on a coloured
+    header, chart bar, or embedded image most pixels are dark/saturated. This sees
+    vector fills AND raster images AND gradients, unlike inspecting drawings alone.
     """
-    area = span_rect.get_area()
-    if area <= 0:
+    clip = fitz.Rect(span_rect)
+    if clip.is_empty or clip.get_area() <= 0:
         return True
-    best_cov, best_fill = 0.0, None
-    for r, f in fills:
-        inter = span_rect & r
-        if not inter.is_empty:
-            cov = inter.get_area() / area
-            if cov > best_cov:
-                best_cov, best_fill = cov, f
-    if best_fill is None or best_cov < cover_ratio:
-        return True  # nothing real behind it -> the page itself
-    return min(best_fill) >= LIGHT_BG_MIN
+    try:
+        pix = page.get_pixmap(clip=clip, alpha=False)
+    except Exception:  # noqa: BLE001 — degenerate clip etc.
+        return True
+    total = pix.width * pix.height
+    if total == 0:
+        return True
+    data, n = pix.samples, pix.n
+    thresh = LIGHT_BG_MIN * 255
+    step = max(1, total // 4000)          # sample at most ~4000 pixels
+    light = sampled = 0
+    for i in range(0, total, step):
+        o = i * n
+        if min(data[o], data[o + 1], data[o + 2]) >= thresh:
+            light += 1
+        sampled += 1
+    return (light / sampled) >= 0.5
 
 
 def _covered_ratio(span_rect: fitz.Rect, dark_rects: list[fitz.Rect]) -> float:
@@ -130,7 +137,7 @@ def scan_page(page: fitz.Page, min_font: float, cover_ratio: float) -> list[Find
 
                 # 2. invisible text: white/near-white AND a light surface behind it.
                 #    White text on a coloured header or chart bar is styled, not hidden.
-                if min(r, g, b) >= NEAR_WHITE_MIN and _background_is_light(rect, fills, cover_ratio):
+                if min(r, g, b) >= NEAR_WHITE_MIN and _background_is_light(page, rect):
                     findings.append(Finding(
                         pno, "invisible", "HIGH", text,
                         f"text colour rgb({r},{g},{b}) is invisible against a light background",
