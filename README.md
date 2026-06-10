@@ -26,9 +26,11 @@ Exit code is 1 when findings exist, 0 when clean — drop it into CI or a
 pre-send hook.
 
 ## Roadmap
-- **Module 2 — structural risk flags.** `/JS`, `/OpenAction`, `/AA`, `/Launch`,
-  embedded files in `/ObjStm`, hex-obfuscated names (`/J#61vaScript`). This is
-  the pdfid feature set, reimplemented cleanly and reported in plain English.
+- **Module 2 — structural risk flags. ✅ done.** Flags objects that can act on you:
+  `/JavaScript`, `/JS`, `/Launch`, `/OpenAction`, `/AA`, `/EmbeddedFile`,
+  `/GoToR`, `/GoToE`, `/SubmitForm`. Resolved through PyMuPDF so it sees objects
+  inside compressed object streams, plus a raw-byte pass that catches hex-escaped
+  names (`/J#61vaScript`) which the parser would otherwise normalize away.
 - **Module 3 — revision diffing (the differentiator).** Walk the xref/trailer
   chain with `pikepdf`, reconstruct each incremental-update revision, and show
   what was *added or changed* after the fact. Nobody in the consumer space does
