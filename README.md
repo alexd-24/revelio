@@ -31,14 +31,15 @@ pre-send hook.
   `/GoToR`, `/GoToE`, `/SubmitForm`. Resolved through PyMuPDF so it sees objects
   inside compressed object streams, plus a raw-byte pass that catches hex-escaped
   names (`/J#61vaScript`) which the parser would otherwise normalize away.
-- **Module 3 — revision diffing (the differentiator).** Walk the xref/trailer
-  chain with `pikepdf`, reconstruct each incremental-update revision, and show
-  what was *added or changed* after the fact. Nobody in the consumer space does
-  this; it's a pure forensics play.
+- **Module 3 — revision diffing. ✅ done.** Reconstructs each incremental-update
+  revision by truncating the file at successive `%%EOF` markers, then diffs the
+  text between consecutive versions to surface what was added or removed *after*
+  the original save (e.g. a value amended after signing). Single-save PDFs report
+  nothing here.
 - **Harder hidden-text cases.** Off-page text, invisible render mode (Tr 3 — the
   OCR layer left under a scanned redaction, which the browser tools explicitly
   can't handle), and clipped/zero-size glyphs.
-- **Wrappers.** Once the core is solid: a thin web upload UI (client-side for
+- **Wrappers.** Now that the core is solid: a thin web upload UI (client-side for
   privacy) and/or a library API.
 ```
 ```

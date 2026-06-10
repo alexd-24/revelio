@@ -224,6 +224,62 @@ def scan_raw_obfuscation(path: str) -> list[Finding]:
     return findings
 
 
+# ---- Module 3: revision diffing -------------------------------------------
+# An incrementally-saved PDF appends each new version to the end of the file,
+# each ending in %%EOF. Truncating the bytes at each %%EOF reconstructs an
+# earlier version; diffing the text between consecutive versions reveals what
+# was changed or added *after* the original save — the forensic smoking gun.
+def _added_lines(old_text: str, new_text: str, cap: int = 25) -> list[str]:
+    """Non-trivial lines present in new_text but not in old_text."""
+    old = {ln.strip() for ln in old_text.splitlines() if len(ln.strip()) >= 3}
+    out, seen = [], set()
+    for ln in new_text.splitlines():
+        s = ln.strip()
+        if len(s) >= 3 and s not in old and s not in seen:
+            seen.add(s)
+            out.append(s)
+            if len(out) >= cap:
+                break
+    return out
+
+
+def scan_revisions(path: str) -> list[Finding]:
+    """Reconstruct each incremental-update revision and diff their text."""
+    findings: list[Finding] = []
+    try:
+        data = open(path, "rb").read()
+    except OSError:
+        return findings
+    eofs = [m.end() for m in re.finditer(rb"%%EOF", data)]
+    if len(eofs) <= 1:
+        return findings  # single save — nothing was appended after the original
+
+    findings.append(Finding(
+        0, "revisions", "LOW", f"{len(eofs)} revisions",
+        f"file has {len(eofs)} saved revisions (incremental updates); normal for "
+        f"signed or re-edited PDFs — check the changes below", ()))
+
+    prev = None
+    for i, end in enumerate(eofs):
+        try:
+            d = fitz.open(stream=data[:end], filetype="pdf")
+            text = "\n".join(p.get_text() for p in d)
+            d.close()
+        except Exception:  # noqa: BLE001 — a boundary that isn't a clean revision
+            continue
+        if prev is not None:
+            for ln in _added_lines(prev, text):
+                findings.append(Finding(
+                    0, "rev-added", "HIGH", f"revision {i + 1}",
+                    f"text added in revision {i + 1}: {ln!r}", ()))
+            for ln in _added_lines(text, prev):
+                findings.append(Finding(
+                    0, "rev-removed", "HIGH", f"revision {i + 1}",
+                    f"text present earlier but gone by revision {i + 1}: {ln!r}", ()))
+        prev = text
+    return findings
+
+
 def scan(path: str, min_font: float = DEFAULT_MIN_FONT,
          cover_ratio: float = DEFAULT_COVER_RATIO) -> list[Finding]:
     findings: list[Finding] = []
@@ -232,6 +288,7 @@ def scan(path: str, min_font: float = DEFAULT_MIN_FONT,
             findings.extend(scan_page(page, min_font, cover_ratio))
         findings.extend(scan_structure(doc))
     findings.extend(scan_raw_obfuscation(path))
+    findings.extend(scan_revisions(path))
     return findings
 
 
