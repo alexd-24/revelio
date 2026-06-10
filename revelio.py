@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, asdict
 
@@ -153,25 +154,99 @@ def scan_page(page: fitz.Page, min_font: float, cover_ratio: float) -> list[Find
     return findings
 
 
+# ---- Module 2: structural risk flags --------------------------------------
+# Object-level features that give a PDF the ability to act on you: run code,
+# auto-trigger, launch programs, carry payloads. Counterpart to Didier Stevens'
+# pdfid, but resolved through PyMuPDF (so it sees objects inside compressed
+# object streams) and de-obfuscated (so hex-escaped names can't hide).
+RISKY: dict[str, tuple[str, str, str]] = {
+    # token        kind             severity  description
+    "/JavaScript": ("javascript",   "HIGH",   "embedded JavaScript"),
+    "/JS":         ("javascript",   "HIGH",   "embedded JavaScript"),
+    "/Launch":     ("launch",       "HIGH",   "Launch action can run an external program"),
+    "/OpenAction": ("auto-action",  "MEDIUM", "runs automatically when the document opens"),
+    "/AA":         ("auto-action",  "MEDIUM", "Additional Action fires on an event (open/close/page)"),
+    "/EmbeddedFile": ("embedded-file", "MEDIUM", "a file is embedded inside the PDF"),
+    "/GoToR":      ("remote-goto",  "LOW",    "references an external file"),
+    "/GoToE":      ("embedded-goto","LOW",    "jumps into an embedded file"),
+    "/SubmitForm": ("submit-form",  "LOW",    "can submit data to a URL"),
+}
+
+
+def _deobfuscate(s: str) -> str:
+    """Decode PDF name hex escapes so /J#61vaScript reads as /JavaScript."""
+    return re.sub(r"#([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), s)
+
+
+def scan_structure(doc: fitz.Document) -> list[Finding]:
+    """Walk every object and flag code-execution / payload-carrying features."""
+    findings: list[Finding] = []
+    patterns = {kw: re.compile(re.escape(kw) + r"(?![A-Za-z])") for kw in RISKY}
+    seen: set[tuple[str, int]] = set()
+
+    for xref in range(1, doc.xref_length()):
+        try:
+            raw = doc.xref_object(xref, compressed=True) or ""
+        except Exception:  # noqa: BLE001 — free/broken object
+            continue
+        deh = _deobfuscate(raw)
+        for kw, (kind, sev, desc) in RISKY.items():
+            if not patterns[kw].search(deh):
+                continue
+            key = (kind, xref)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(Finding(0, kind, sev, f"object {xref}", desc, ()))
+    return findings
+
+
+def scan_raw_obfuscation(path: str) -> list[Finding]:
+    """Catch hex-escaped risky names in the raw bytes, before any parser cleans them.
+
+    PyMuPDF normalizes /J#61vaScript back to /JavaScript, erasing the evasion signal,
+    so name-obfuscation can only be seen at the byte level (the pdfid approach).
+    """
+    findings: list[Finding] = []
+    try:
+        data = open(path, "rb").read()
+    except OSError:
+        return findings
+    for m in re.finditer(rb"/[A-Za-z0-9#]+", data):
+        tok = m.group().decode("latin-1")
+        if "#" not in tok:
+            continue
+        decoded = _deobfuscate(tok)
+        if decoded in RISKY:
+            findings.append(Finding(
+                0, "obfuscated-name", "HIGH", f"offset {m.start()}",
+                f"name hex-escaped to {decoded} to dodge keyword scanners", ()))
+    return findings
+
+
 def scan(path: str, min_font: float = DEFAULT_MIN_FONT,
          cover_ratio: float = DEFAULT_COVER_RATIO) -> list[Finding]:
     findings: list[Finding] = []
     with fitz.open(path) as doc:
         for page in doc:
             findings.extend(scan_page(page, min_font, cover_ratio))
+        findings.extend(scan_structure(doc))
+    findings.extend(scan_raw_obfuscation(path))
     return findings
 
 
 def _print_report(path: str, findings: list[Finding]) -> None:
     if not findings:
-        print(f"[ok] {path}: no hidden text detected")
+        print(f"[ok] {path}: nothing flagged")
         return
     print(f"[!] {path}: {len(findings)} finding(s)\n")
-    order = {"HIGH": 0, "MEDIUM": 1}
-    for f in sorted(findings, key=lambda x: (order[x.severity], x.page)):
+    order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "INFO": 3}
+    for f in sorted(findings, key=lambda x: (order.get(x.severity, 9), x.page)):
+        loc = "doc" if f.page == 0 else f"p{f.page}"
         snippet = (f.text[:80] + "…") if len(f.text) > 80 else f.text
-        print(f"  p{f.page}  {f.severity:<6} {f.kind:<9} {f.detail}")
-        print(f"        ↳ recovered: {snippet!r}\n")
+        verb = "at" if not f.bbox else "recovered"
+        print(f"  {loc:<4} {f.severity:<6} {f.kind:<13} {f.detail}")
+        print(f"        ↳ {verb}: {snippet!r}\n")
 
 
 def main(argv=None) -> int:
