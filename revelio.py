@@ -280,6 +280,84 @@ def scan_revisions(path: str) -> list[Finding]:
     return findings
 
 
+# ---- Module 4: provenance signals (v0 — presence only) --------------------
+# Reports what a file *declares* about its own origin: AI/generative tools named
+# in metadata, AI-generated markers in XMP, and Content Credentials (C2PA) on the
+# document or its embedded images. This is provenance, NOT statistical "is it AI"
+# guessing — every finding is a verifiable fact in the bytes. Two honest limits,
+# baked into the wording: presence isn't proof (metadata is editable, manifests
+# need signature validation — a v1 job), and absence is never reported as "human".
+AI_TOOL_HINTS = [
+    "firefly", "dall-e", "dall·e", "dalle", "midjourney", "stable diffusion",
+    "stablediffusion", "canva", "microsoft designer", "designer.microsoft",
+    "bing image creator", "leonardo.ai", "ideogram", "imagen", "recraft",
+    "flux.1", "adobe express", "gpt-4o", "nano banana", "grok",
+]
+AI_DECLARED = [b"trainedAlgorithmicMedia", b"compositeWithTrainedAlgorithmicMedia"]
+C2PA_MARKERS = [b"c2pa", b"jumbf", b"contentauth", b"urn:uuid:c2pa"]
+
+
+def _image_xrefs(doc: fitz.Document) -> set[int]:
+    xrefs: set[int] = set()
+    for pno in range(doc.page_count):
+        for info in doc.get_page_images(pno):
+            xrefs.add(info[0])
+    return xrefs
+
+
+def scan_provenance(doc: fitz.Document) -> list[Finding]:
+    findings: list[Finding] = []
+
+    # 1. document metadata naming a generative tool
+    md = doc.metadata or {}
+    for field in ("producer", "creator"):
+        val = (md.get(field) or "").strip()
+        low = val.lower()
+        hit = next((h for h in AI_TOOL_HINTS if h in low), None)
+        if hit:
+            findings.append(Finding(
+                0, "ai-tool-metadata", "LOW", f"{field}={val!r}",
+                f"{field} metadata names a generative tool ({hit}); the document "
+                f"declares this — not proof, metadata is editable", ()))
+
+    # 2. XMP packet: AI-generated declaration and/or C2PA at document level
+    try:
+        xmp = doc.get_xml_metadata() or ""
+    except Exception:  # noqa: BLE001
+        xmp = ""
+    xb = xmp.encode("utf-8", "ignore")
+    decl = next((m for m in AI_DECLARED if m in xb), None)
+    if decl:
+        findings.append(Finding(
+            0, "ai-declared", "LOW", "XMP metadata",
+            f"XMP declares AI-generated content ({decl.decode()}) per the IPTC "
+            f"digital-source vocabulary", ()))
+    if any(c in xb for c in C2PA_MARKERS):
+        findings.append(Finding(
+            0, "content-credentials", "LOW", "XMP metadata",
+            "document carries Content Credentials (C2PA) — present, but the signature "
+            "is unverified here (validation is a v1 job)", ()))
+
+    # 3. embedded images carrying Content Credentials or an AI-generated marker
+    for xref in sorted(_image_xrefs(doc)):
+        try:
+            blob = doc.extract_image(xref).get("image", b"")
+        except Exception:  # noqa: BLE001
+            continue
+        if not blob:
+            continue
+        if any(c in blob for c in C2PA_MARKERS):
+            findings.append(Finding(
+                0, "content-credentials", "LOW", f"image xref {xref}",
+                "embedded image carries Content Credentials (C2PA) — verify with a "
+                "C2PA validator", ()))
+        if any(m in blob for m in AI_DECLARED):
+            findings.append(Finding(
+                0, "ai-declared", "LOW", f"image xref {xref}",
+                "embedded image declares AI-generated origin in its metadata", ()))
+    return findings
+
+
 def scan(path: str, min_font: float = DEFAULT_MIN_FONT,
          cover_ratio: float = DEFAULT_COVER_RATIO) -> list[Finding]:
     findings: list[Finding] = []
@@ -287,6 +365,7 @@ def scan(path: str, min_font: float = DEFAULT_MIN_FONT,
         for page in doc:
             findings.extend(scan_page(page, min_font, cover_ratio))
         findings.extend(scan_structure(doc))
+        findings.extend(scan_provenance(doc))
     findings.extend(scan_raw_obfuscation(path))
     findings.extend(scan_revisions(path))
     return findings

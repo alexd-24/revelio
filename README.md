@@ -36,6 +36,13 @@ pre-send hook.
   text between consecutive versions to surface what was added or removed *after*
   the original save (e.g. a value amended after signing). Single-save PDFs report
   nothing here.
+- **Module 4 — provenance signals. ✅ v0 done.** Reports what a file *declares*
+  about its origin: generative tools named in producer/creator metadata, AI-generated
+  markers in XMP (IPTC `trainedAlgorithmicMedia`), and Content Credentials (C2PA) on
+  the document and its embedded images. Presence detection only — every finding is
+  worded as a declaration, never proof. **v1 (next):** verify the C2PA manifest
+  signature and assertion chain (needs the `c2pa` library); flag a manifest whose
+  claims don't match the file.
 - **Harder hidden-text cases.** Off-page text, invisible render mode (Tr 3 — the
   OCR layer left under a scanned redaction, which the browser tools explicitly
   can't handle), and clipped/zero-size glyphs.
