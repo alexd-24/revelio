@@ -1,0 +1,6 @@
+# Core — required
+pymupdf>=1.24
+
+# Optional — enables Module 4 v1 (C2PA signature validation).
+# Without it, provenance falls back to presence detection.
+c2pa-python>=0.32
