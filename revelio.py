@@ -22,12 +22,19 @@ Dependency: PyMuPDF  (pip install pymupdf)
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import re
 import sys
 from dataclasses import dataclass, asdict
 
 import fitz  # PyMuPDF
+
+try:
+    import c2pa  # optional: enables Module 4 v1 signature validation
+    HAVE_C2PA = True
+except Exception:  # noqa: BLE001
+    HAVE_C2PA = False
 
 
 # ---- tunables -------------------------------------------------------------
@@ -332,11 +339,14 @@ def scan_provenance(doc: fitz.Document) -> list[Finding]:
             0, "ai-declared", "LOW", "XMP metadata",
             f"XMP declares AI-generated content ({decl.decode()}) per the IPTC "
             f"digital-source vocabulary", ()))
+    c2pa_seen = False
     if any(c in xb for c in C2PA_MARKERS):
-        findings.append(Finding(
-            0, "content-credentials", "LOW", "XMP metadata",
-            "document carries Content Credentials (C2PA) — present, but the signature "
-            "is unverified here (validation is a v1 job)", ()))
+        c2pa_seen = True
+        if not HAVE_C2PA:
+            findings.append(Finding(
+                0, "content-credentials", "LOW", "XMP metadata",
+                "document carries Content Credentials (C2PA) — present but unverified; "
+                "install c2pa-python to validate the signature", ()))
 
     # 3. embedded images carrying Content Credentials or an AI-generated marker
     for xref in sorted(_image_xrefs(doc)):
@@ -347,14 +357,95 @@ def scan_provenance(doc: fitz.Document) -> list[Finding]:
         if not blob:
             continue
         if any(c in blob for c in C2PA_MARKERS):
-            findings.append(Finding(
-                0, "content-credentials", "LOW", f"image xref {xref}",
-                "embedded image carries Content Credentials (C2PA) — verify with a "
-                "C2PA validator", ()))
+            c2pa_seen = True
+            if not HAVE_C2PA:
+                findings.append(Finding(
+                    0, "content-credentials", "LOW", f"image xref {xref}",
+                    "embedded image carries Content Credentials (C2PA) — present but "
+                    "unverified; install c2pa-python to validate the signature", ()))
         if any(m in blob for m in AI_DECLARED):
             findings.append(Finding(
                 0, "ai-declared", "LOW", f"image xref {xref}",
                 "embedded image declares AI-generated origin in its metadata", ()))
+    return findings
+
+
+def _validate_c2pa_blob(blob: bytes, mime: str, where: str) -> list[Finding]:
+    """Run the c2pa Reader on one blob and turn its verdict into a Finding."""
+    try:
+        reader = c2pa.Reader(mime, stream=io.BytesIO(blob))
+    except Exception:  # noqa: BLE001 — no manifest / unreadable format
+        return []
+    try:
+        state = str(reader.get_validation_state())
+        store = json.loads(reader.json())
+    except Exception:  # noqa: BLE001
+        return []
+
+    active = store.get("active_manifest")
+    m = (store.get("manifests") or {}).get(active, {}) if active else {}
+    issuer = (m.get("signature_info") or {}).get("issuer") or "unknown signer"
+    gens = m.get("claim_generator_info") or []
+    gen = ", ".join(g.get("name", "?") for g in gens) if isinstance(gens, list) else str(gens)
+
+    ai = None
+    for a in m.get("assertions", []):
+        if a.get("label", "").startswith("c2pa.actions"):
+            for act in a.get("data", {}).get("actions", []):
+                src = act.get("digitalSourceType") or ""
+                if "trainedAlgorithmicMedia" in src:
+                    ai = src.rsplit("/", 1)[-1]
+
+    low = state.lower()
+    if "invalid" in low:
+        verdict = (f"Content Credentials INVALID ({state}) — a manifest is present but its "
+                   f"signature/hash fails: the content was changed after signing, or the "
+                   f"manifest is broken. Signer claimed: {issuer!r}")
+        kind, sev = "c2pa-invalid", "HIGH"
+    else:
+        verdict = f"Content Credentials {state} — signed by {issuer!r}; generator: {gen or 'n/a'}"
+        if "trusted" not in low:
+            verdict += "; signature is internally valid but the signer is not on a trust list"
+        kind, sev = "c2pa-valid", "LOW"
+    if ai:
+        verdict += f"; declares AI-generated origin ({ai})"
+    return [Finding(0, kind, sev, where, verdict, ())]
+
+
+def validate_c2pa(doc: fitz.Document, path: str) -> list[Finding]:
+    """Module 4 v1: cryptographically validate any Content Credentials present.
+
+    Validates the PDF itself (for Acrobat-style signed PDFs) and each embedded
+    image carrying a C2PA marker. A marker that's present but yields no readable,
+    valid manifest is reported (never silently dropped) — a corrupt or stripped
+    manifest is itself a red flag. Only runs when the optional c2pa library is
+    installed; otherwise scan_provenance emits a presence note plus an install hint.
+    """
+    if not HAVE_C2PA:
+        return []
+    findings: list[Finding] = []
+    unreadable = ("a Content Credentials marker is present but no valid manifest could "
+                  "be read — it may be corrupt, truncated, or stripped; treat with suspicion")
+
+    # document-level: only assert a verdict if a real PDF-level manifest reads.
+    # (A bare marker in the raw bytes is usually an embedded image's, handled below.)
+    try:
+        findings += _validate_c2pa_blob(open(path, "rb").read(), "application/pdf", "document")
+    except OSError:
+        pass
+
+    # embedded images: marker confirmed in *this* image's bytes, so silence = corrupt.
+    for xref in sorted(_image_xrefs(doc)):
+        try:
+            info = doc.extract_image(xref)
+            blob, ext = info.get("image", b""), info.get("ext", "")
+        except Exception:  # noqa: BLE001
+            continue
+        if not blob or not any(c in blob for c in C2PA_MARKERS):
+            continue
+        res = _validate_c2pa_blob(blob, f"image/{ext or 'jpeg'}", f"image xref {xref}")
+        findings += res or [Finding(0, "c2pa-unreadable", "MEDIUM",
+                                    f"image xref {xref}", unreadable, ())]
     return findings
 
 
@@ -366,6 +457,7 @@ def scan(path: str, min_font: float = DEFAULT_MIN_FONT,
             findings.extend(scan_page(page, min_font, cover_ratio))
         findings.extend(scan_structure(doc))
         findings.extend(scan_provenance(doc))
+        findings.extend(validate_c2pa(doc, path))
     findings.extend(scan_raw_obfuscation(path))
     findings.extend(scan_revisions(path))
     return findings

@@ -37,13 +37,19 @@ value amended after signing). Single-save PDFs report nothing here.
 **4. Provenance signals** — reports what a file *declares* about its origin:
 generative tools named in producer/creator metadata, AI-generated markers in XMP
 (IPTC `trainedAlgorithmicMedia`), and Content Credentials (C2PA) on the document
-and its embedded images. Presence detection only — every finding is worded as a
-declaration, never proof. This is provenance, not statistical "is it AI" guessing.
+and its embedded images. With the optional `c2pa` library installed, it goes
+further and *cryptographically validates* each manifest — reporting `Valid`
+(with signer and claim generator), `INVALID` when the signature or content hash
+fails (i.e. the file was changed after signing — tamper detection), or flagging a
+marker that's present but unreadable. A valid signature from a signer that isn't
+on a trust list is reported as such, not as "trusted". This is provenance, not
+statistical "is it AI" guessing.
 
 ## Usage
 
 ```bash
-pip install pymupdf
+pip install pymupdf                       # core
+pip install c2pa-python                    # optional — enables C2PA signature validation
 python revelio.py document.pdf            # human-readable
 python revelio.py document.pdf --json     # machine-readable, for pipelines
 python make_test.py                       # regenerate a planted test fixture
@@ -61,8 +67,6 @@ absence is never reported as "human-made".
 
 ## Roadmap
 
-- **Provenance v1.** Verify the C2PA manifest signature and assertion chain
-  (needs the `c2pa` library); flag a manifest whose claims don't match the file.
 - **Harder hidden-text cases.** Off-page text, invisible render mode (Tr 3 — the
   OCR layer left under a scanned redaction, which the browser tools explicitly
   can't handle), and clipped / zero-size glyphs.
