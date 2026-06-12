@@ -48,6 +48,26 @@ marker that's present but unreadable. A valid signature from a signer that isn't
 on a trust list is reported as such, not as "trusted". This is provenance, not
 statistical "is it AI" guessing.
 
+## Severity
+
+Severity reflects how much a finding should concern you — not how confident the
+detection is. Every finding is a verified fact in the bytes; severity is about
+what it *means*.
+
+- **HIGH** — likely a real problem: recoverable text hidden from a reader
+  (`covered`, `ocr-covered`, `invisible`), code or launch capability
+  (`javascript`, `launch`), hex-obfuscated names, content changed after the
+  original save (`rev-added`, `rev-removed`), or a failed/forged signature
+  (`c2pa-invalid`).
+- **MEDIUM** — worth a look, may be benign: tiny `microfont` text, auto-run
+  actions (`auto-action`), embedded files, or a Content Credentials marker that
+  won't validate (`c2pa-unreadable`).
+- **LOW** — declarative context, not a problem in itself: what the file *says*
+  about its origin (`ai-tool-metadata`, `ai-declared`, a valid `c2pa-valid`
+  signature), how many times it was saved (`revisions`), and remote/submit
+  references.
+- **INFO** — tool notes, e.g. a hint to install `c2pa-python` for validation.
+
 ## Usage
 
 ```bash
