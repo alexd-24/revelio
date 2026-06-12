@@ -1,5 +1,7 @@
 # Revelio
 
+[![tests](https://github.com/alexd-24/revelio/actions/workflows/tests.yml/badge.svg)](https://github.com/alexd-24/revelio/actions/workflows/tests.yml)
+
 A static forensic scanner for PDFs. It surfaces what a document is hiding from a
 reader, what it can do to a machine, what was changed after it was finalised, and
 what it declares about its own origin — none of which is visible by just opening
@@ -70,6 +72,18 @@ python serve.py        # then visit http://127.0.0.1:8000
 It runs entirely on your machine — the PDF never leaves it — and uses only the
 standard library (no extra install). Drop a PDF in and the four modules' findings
 render grouped by module and severity.
+
+## Tests
+
+```bash
+pip install pytest
+pytest
+```
+
+Fourteen behavioural tests assert each module's findings on planted fixtures —
+and that the controls (white-on-coloured-header, benign OCR layer, clean files)
+produce no false positives. They run on every push via GitHub Actions. The C2PA
+validation tests skip cleanly if `c2pa-python` isn't installed.
 
 ## Honest limits
 
