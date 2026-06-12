@@ -18,6 +18,7 @@ recoverable with copy-paste or a parser:
 | covered   | real text under a dark fill / redaction box       | HIGH     |
 | invisible | text drawn in a colour that vanishes into its background | HIGH |
 | microfont | text below the legibility floor (default < 4pt)   | MEDIUM   |
+| ocr-covered | invisible OCR-layer text hidden under a *scanned* redaction (a black bar painted into the page image) | HIGH |
 
 The `invisible` check is contrast-aware: it samples the actual rendered pixels
 behind each span, so white text on a coloured header or chart image is correctly
@@ -79,7 +80,5 @@ absence is never reported as "human-made".
 
 ## Roadmap
 
-- **Harder hidden-text cases.** Off-page text, invisible render mode (Tr 3 — the
-  OCR layer left under a scanned redaction, which the browser tools explicitly
-  can't handle), and clipped / zero-size glyphs.
-- **Wrappers.** A thin web upload UI (client-side for privacy) and/or a library API.
+- **Wrappers / distribution.** A hosted version, a packaged release on PyPI, and a
+  library API for embedding the checks in other pipelines.

@@ -2,11 +2,13 @@
 """
 Revelio — surface text a PDF is hiding from the human eye.
 
-v0 catches three of the most common "looks clean, isn't" failures:
+v0 catches common "looks clean, isn't" failures:
   1. Covered text   — real text sitting under a solid dark rectangle
                       (the classic failed / cosmetic redaction).
   2. Invisible text — text drawn in white / near-white on a white page.
   3. Microfont text — text too small to read (default < 4pt) but fully extractable.
+  4. OCR-covered    — invisible OCR-layer text hidden under a scanned redaction
+                      (a black bar painted into the page image).
 
 All three are visually absent yet remain in the byte stream, so anyone with
 copy-paste or a parser can recover them. This is the gap the free browser
@@ -43,6 +45,8 @@ NEAR_WHITE_MIN = 240      # text counts as "invisible" if every channel >= this 
 DEFAULT_MIN_FONT = 4.0    # text smaller than this (pt) is flagged as microfont
 DEFAULT_COVER_RATIO = 0.6 # a span is "covered" if >= this fraction of its area sits under a dark rect
 LIGHT_BG_MIN = 0.85       # a fill counts as a "light" background (white text on it = actually invisible)
+NEAR_BLACK_MAX = 50       # a pixel counts as "dark" if every channel < this (0..255)
+OCR_DARK_RATIO = 0.5      # invisible text over >= this fraction of dark pixels = hidden under a redaction
 
 
 @dataclass
@@ -158,6 +162,69 @@ def scan_page(page: fitz.Page, min_font: float, cover_ratio: float) -> list[Find
                         pno, "microfont", "MEDIUM", text,
                         f"font size {size:.1f}pt is below the {min_font:g}pt legibility floor",
                         tuple(rect)))
+    findings.extend(_scan_ocr_redaction(page, dark_rects))
+    return findings
+
+
+def _dark_pixel_fraction(page: fitz.Page, rect: fitz.Rect) -> float:
+    """Fraction of near-black pixels in a region (a solid redaction bar -> ~1.0)."""
+    clip = fitz.Rect(rect)
+    if clip.is_empty or clip.get_area() <= 0:
+        return 0.0
+    try:
+        pix = page.get_pixmap(clip=clip, alpha=False)
+    except Exception:  # noqa: BLE001
+        return 0.0
+    total = pix.width * pix.height
+    if total == 0:
+        return 0.0
+    data, n = pix.samples, pix.n
+    step = max(1, total // 4000)
+    dark = sampled = 0
+    for i in range(0, total, step):
+        o = i * n
+        if max(data[o], data[o + 1], data[o + 2]) < NEAR_BLACK_MAX:
+            dark += 1
+        sampled += 1
+    return dark / sampled
+
+
+def _scan_ocr_redaction(page: fitz.Page, dark_rects: list) -> list[Finding]:
+    """Catch recoverable text hidden under a *scanned* redaction.
+
+    OCR software adds an invisible text layer (render mode Tr 3) so a scanned page
+    is searchable. If someone then hides text with a black bar — especially one
+    painted into the page image rather than a vector box — the bar covers the
+    picture but the invisible words remain extractable. We flag invisible-mode text
+    whose rendered region is a solid dark area. Vector boxes are already handled by
+    the `covered` check, so those are skipped here to avoid double-reporting; this
+    targets the raster/baked-in case nothing else catches. The benign searchable
+    layer (invisible text over normal light page content) never trips it.
+    """
+    try:
+        trace = page.get_texttrace()
+    except Exception:  # noqa: BLE001
+        return []
+    # nothing dark on the page -> no possible redaction -> skip the pixel work
+    if not dark_rects and not page.get_images():
+        return []
+
+    findings: list[Finding] = []
+    pno = page.number + 1
+    for span in trace:
+        if span.get("type") != 3:  # only invisible render mode
+            continue
+        text = "".join(chr(c[0]) for c in span.get("chars", []) if c and c[0]).strip()
+        if len(text) < 3:
+            continue
+        rect = fitz.Rect(span.get("bbox"))
+        if _covered_ratio(rect, dark_rects) >= DEFAULT_COVER_RATIO:
+            continue  # a vector box covers it -> already reported as `covered`
+        if _dark_pixel_fraction(page, rect) >= OCR_DARK_RATIO:
+            findings.append(Finding(
+                pno, "ocr-covered", "HIGH", text,
+                "invisible OCR-layer text sits under a solid dark area (a redaction "
+                "painted into the page image) yet is still extractable", tuple(rect)))
     return findings
 
 
