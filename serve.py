@@ -25,8 +25,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import revelio  # noqa: E402  (local import after path setup)
 
-HOST, PORT = "127.0.0.1", 8000
-MAX_BYTES = 80 * 1024 * 1024  # 80 MB upload ceiling
+# Config — environment-driven so the same file runs locally and on a host.
+# A platform (Render, etc.) sets $PORT; we then bind 0.0.0.0 to be reachable.
+_PLATFORM = bool(os.environ.get("PORT"))
+HOST = "0.0.0.0" if _PLATFORM else "127.0.0.1"
+PORT = int(os.environ.get("PORT", "8000"))
+# Public instances get a smaller cap: rendering big scans can exhaust a 512 MB box.
+MAX_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "25" if _PLATFORM else "80")) * 1024 * 1024
 INDEX = os.path.join(HERE, "web", "index.html")
 
 
@@ -87,14 +92,15 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
-    url = f"http://{HOST}:{PORT}"
-    print(f"Revelio web UI running at {url}")
+    shown = "127.0.0.1" if HOST == "0.0.0.0" else HOST
+    print(f"Revelio web UI on http://{shown}:{PORT}")
     print(f"C2PA validation: {'on' if revelio.HAVE_C2PA else 'off (pip install c2pa-python)'}")
     print("Press Ctrl+C to stop.")
-    try:
-        webbrowser.open(url)
-    except Exception:  # noqa: BLE001
-        pass
+    if not _PLATFORM:  # only pop a browser when run locally
+        try:
+            webbrowser.open(f"http://{shown}:{PORT}")
+        except Exception:  # noqa: BLE001
+            pass
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -1,0 +1,18 @@
+# Render blueprint — deploy the Revelio web UI on the free tier.
+# In Render: New > Blueprint, point it at this repo, and it reads this file.
+# Render injects $PORT; serve.py binds 0.0.0.0:$PORT automatically.
+#
+# The free build installs PyMuPDF only (no c2pa) to stay light on a 512 MB box:
+# provenance falls back to presence detection, the rest of the tool is unchanged.
+services:
+  - type: web
+    name: revelio
+    runtime: python
+    plan: free
+    buildCommand: pip install pymupdf
+    startCommand: python serve.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      - key: MAX_UPLOAD_MB
+        value: "20"

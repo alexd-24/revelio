@@ -93,6 +93,17 @@ It runs entirely on your machine — the PDF never leaves it — and uses only t
 standard library (no extra install). Drop a PDF in and the four modules' findings
 render grouped by module and severity.
 
+### Deploy (free)
+
+`serve.py` reads `$PORT` and binds `0.0.0.0` when a host sets it, so it runs
+unchanged on a platform. The included `render.yaml` deploys it on
+[Render](https://render.com)'s free tier: **New → Blueprint**, point it at this
+repo, done. The free build installs PyMuPDF only (C2PA validation off, to stay
+within the 512 MB limit), and `MAX_UPLOAD_MB` caps uploads so a large scan can't
+exhaust the box. Note: a public instance accepts uploads from strangers — PDF
+parsing is an attack surface, so treat hardening (sandboxing, stricter caps) as
+required before promoting it past a demo.
+
 ## Tests
 
 ```bash
