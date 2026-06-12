@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revelio — what is this PDF hiding?</title>
+<style>
+  :root{
+    --paper:#f4f2ec; --paper-2:#ebe8df; --ink:#17161a; --ink-soft:#56535c;
+    --uv:#6c4ce0; --uv-soft:#efeafd; --line:#d8d4c8;
+    --high:#c8102e; --med:#bd7400; --low:#566b7e; --info:#8a8f98; --ok:#2f7d52;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--paper); color:var(--ink); font-family:var(--sans);
+    line-height:1.5; -webkit-font-smoothing:antialiased;
+    background-image:linear-gradient(var(--paper-2) 1px,transparent 1px);
+    background-size:100% 2.2rem;
+  }
+  .wrap{max-width:880px;margin:0 auto;padding:clamp(1.5rem,4vw,3.5rem) 1.25rem 4rem}
+
+  /* masthead */
+  .mast{display:flex;align-items:baseline;gap:.7rem;border-bottom:2px solid var(--ink);padding-bottom:.7rem}
+  .logo{font-weight:800;font-size:clamp(1.7rem,4.5vw,2.4rem);letter-spacing:-.03em}
+  .logo .x{color:var(--uv)}
+  .tag{font-family:var(--mono);font-size:.72rem;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.14em;margin-left:auto}
+  .lede{margin:.9rem 0 1.6rem;max-width:62ch;color:var(--ink-soft);font-size:1.02rem}
+  .lede b{color:var(--ink);font-weight:600}
+
+  /* drop zone = a redacted sheet */
+  .drop{position:relative;border:1.5px dashed var(--line);background:#fff;border-radius:4px;
+    padding:1.6rem;cursor:pointer;overflow:hidden;transition:border-color .2s,box-shadow .2s}
+  .drop:hover,.drop.over{border-color:var(--uv);box-shadow:0 0 0 4px var(--uv-soft)}
+  .drop.over{border-style:solid}
+  .sheet{pointer-events:none;display:flex;flex-direction:column;gap:.62rem;margin-bottom:1.1rem}
+  .ln{height:.62rem;border-radius:2px;background:var(--paper-2)}
+  .ln.bar{background:var(--ink);position:relative}
+  .ln.w1{width:82%}.ln.w2{width:64%}.ln.w3{width:91%}.ln.w4{width:48%}.ln.w5{width:73%}
+  /* UV sweep reveals the bars while scanning / hovering */
+  .drop::after{content:"";position:absolute;top:0;left:-30%;width:22%;height:100%;
+    background:linear-gradient(90deg,transparent,rgba(108,76,224,.22),transparent);
+    transform:skewX(-12deg);opacity:0;transition:opacity .25s}
+  .drop:hover::after,.drop.over::after{opacity:1;animation:sweep 1.7s ease-in-out infinite}
+  .drop.scanning::after{opacity:1;animation:sweep 1.1s linear infinite}
+  .drop:hover .ln.bar,.drop.over .ln.bar,.drop.scanning .ln.bar{background:repeating-linear-gradient(90deg,var(--ink-soft) 0 6px,transparent 6px 11px);opacity:.5}
+  @keyframes sweep{0%{left:-30%}100%{left:110%}}
+  .cta{display:flex;align-items:center;gap:.6rem;font-family:var(--mono);font-size:.85rem}
+  .cta b{color:var(--uv)}
+  .meta{display:flex;gap:1rem;flex-wrap:wrap;margin-top:.8rem;font-family:var(--mono);font-size:.7rem;color:var(--ink-soft)}
+  .pill{display:inline-flex;align-items:center;gap:.4rem}
+  .dot{width:.5rem;height:.5rem;border-radius:50%;background:var(--info)}
+  .dot.on{background:var(--ok)}
+
+  /* results */
+  .out{margin-top:1.8rem}
+  .summary{display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:.6rem;margin-bottom:.4rem}
+  .summary h2{font-size:1.05rem;margin:0;letter-spacing:-.01em}
+  .counts{display:flex;gap:.4rem;flex-wrap:wrap;margin-left:auto}
+  .chip{font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;
+    padding:.16rem .5rem;border-radius:999px;color:#fff}
+  .chip.high{background:var(--high)}.chip.medium{background:var(--med)}
+  .chip.low{background:var(--low)}.chip.info{background:var(--info)}
+
+  .mod{margin-top:1.3rem}
+  .mod h3{font-family:var(--mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.12em;
+    color:var(--ink-soft);margin:0 0 .5rem;display:flex;align-items:center;gap:.6rem}
+  .mod h3::after{content:"";flex:1;height:1px;background:var(--line)}
+  .find{display:grid;grid-template-columns:auto 1fr;gap:.55rem .8rem;padding:.7rem .2rem;border-bottom:1px solid var(--paper-2)}
+  .sev{align-self:start;font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.06em;
+    padding:.2rem .45rem;border-radius:3px;color:#fff;white-space:nowrap}
+  .sev.high{background:var(--high)}.sev.medium{background:var(--med)}.sev.low{background:var(--low)}.sev.info{background:var(--info)}
+  .body .k{font-family:var(--mono);font-size:.82rem;font-weight:600}
+  .body .loc{font-family:var(--mono);font-size:.74rem;color:var(--uv);margin-left:.5rem}
+  .body .d{font-size:.9rem;color:var(--ink-soft);margin-top:.15rem}
+
+  .clean{margin-top:1.6rem;border:1px solid var(--line);border-left:3px solid var(--ok);
+    background:#fff;padding:1.1rem 1.2rem;border-radius:4px}
+  .clean h2{margin:0 0 .3rem;font-size:1.02rem}
+  .clean p{margin:0;color:var(--ink-soft);font-size:.9rem}
+  .err{margin-top:1.6rem;border-left:3px solid var(--high);background:#fff;padding:1rem 1.2rem;font-family:var(--mono);font-size:.85rem}
+
+  footer{margin-top:3rem;border-top:1px solid var(--line);padding-top:1rem;
+    font-family:var(--mono);font-size:.7rem;color:var(--ink-soft);display:flex;gap:1rem;flex-wrap:wrap}
+  a{color:var(--uv)}
+  @media (prefers-reduced-motion:reduce){.drop::after{animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <div class="logo">Revel<span class="x">io</span></div>
+    <div class="tag">forensic pdf inspector</div>
+  </header>
+
+  <p class="lede">Open a PDF and see what it isn't showing you: <b>text hidden</b> from a
+    reader, structures that can <b>act on your machine</b>, edits made <b>after it was
+    finalised</b>, and what it <b>declares about its origin</b>. Everything runs locally —
+    the file never leaves this computer.</p>
+
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose or drop a PDF to inspect">
+    <div class="sheet" aria-hidden="true">
+      <div class="ln w3"></div>
+      <div class="ln bar w1"></div>
+      <div class="ln w5"></div>
+      <div class="ln bar w4"></div>
+      <div class="ln w2"></div>
+    </div>
+    <div class="cta"><b>Drop a PDF here</b> or click to choose</div>
+    <div class="meta">
+      <span class="pill"><span class="dot" id="c2paDot"></span><span id="c2paLabel">checking C2PA…</span></span>
+      <span class="pill">local only · nothing uploaded</span>
+    </div>
+  </div>
+  <input type="file" id="file" accept="application/pdf,.pdf" hidden>
+
+  <div class="out" id="out" aria-live="polite"></div>
+
+  <footer>
+    <span>Revelio</span><span>runs on your machine</span>
+    <a href="https://github.com/alexd-24/revelio" target="_blank" rel="noopener">source</a>
+  </footer>
+</div>
+
+<script>
+const MODULES = [
+  ["Hidden text", ["covered","invisible","microfont"]],
+  ["Structural risk", ["javascript","launch","auto-action","embedded-file","remote-goto","embedded-goto","submit-form","obfuscated-name"]],
+  ["Revision history", ["revisions","rev-added","rev-removed"]],
+  ["Provenance", ["ai-tool-metadata","ai-declared","content-credentials","c2pa-valid","c2pa-invalid","c2pa-unreadable"]],
+];
+const moduleOf = k => (MODULES.find(([,ks])=>ks.includes(k))||["Other"])[0];
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+const drop=document.getElementById("drop"), file=document.getElementById("file"), out=document.getElementById("out");
+
+fetch("/info").then(r=>r.json()).then(d=>{
+  const dot=document.getElementById("c2paDot"), lbl=document.getElementById("c2paLabel");
+  if(d.c2pa){dot.classList.add("on");lbl.textContent="C2PA validation: on";}
+  else{lbl.textContent="C2PA validation: off (pip install c2pa-python)";}
+}).catch(()=>{document.getElementById("c2paLabel").textContent="";});
+
+drop.addEventListener("click",()=>file.click());
+drop.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();file.click();}});
+file.addEventListener("change",()=>file.files[0]&&scan(file.files[0]));
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();if(ev==="dragleave"&&drop.contains(e.relatedTarget))return;drop.classList.remove("over");}));
+drop.addEventListener("drop",e=>{const f=e.dataTransfer.files[0];if(f)scan(f);});
+
+async function scan(f){
+  if(f.type && f.type!=="application/pdf" && !f.name.toLowerCase().endsWith(".pdf")){
+    return show(`<div class="err">That doesn't look like a PDF. Choose a .pdf file.</div>`);
+  }
+  drop.classList.add("scanning");
+  out.innerHTML=`<div class="err" style="border-color:var(--uv);color:var(--ink-soft)">Inspecting <b>${esc(f.name)}</b>…</div>`;
+  try{
+    const res=await fetch("/scan",{method:"POST",headers:{"X-Filename":encodeURIComponent(f.name)},body:f});
+    const data=await res.json();
+    if(data.error) show(`<div class="err">${esc(data.error)}</div>`);
+    else render(f.name,data.findings||[]);
+  }catch(err){
+    show(`<div class="err">Couldn't reach the local scanner. Is <b>serve.py</b> still running?</div>`);
+  }finally{drop.classList.remove("scanning");}
+}
+function show(html){out.innerHTML=html;}
+
+function render(name,findings){
+  if(!findings.length){
+    return show(`<div class="clean"><h2>Nothing surfaced in ${esc(name)}.</h2>
+      <p>“Clean” means nothing was found — not that the file is verified safe. The hidden-text
+      checks only see extractable text, so an image-only scanned page can still hide content.</p></div>`);
+  }
+  const order={HIGH:0,MEDIUM:1,LOW:2,INFO:3};
+  const counts={};findings.forEach(f=>counts[f.severity]=(counts[f.severity]||0)+1);
+  const chipline=["HIGH","MEDIUM","LOW","INFO"].filter(s=>counts[s])
+    .map(s=>`<span class="chip ${s.toLowerCase()}">${counts[s]} ${s.toLowerCase()}</span>`).join("");
+  let html=`<div class="summary"><h2>${findings.length} finding${findings.length>1?"s":""} in ${esc(name)}</h2>
+    <div class="counts">${chipline}</div></div>`;
+
+  for(const [mod] of MODULES){
+    const rows=findings.filter(f=>moduleOf(f.kind)===mod)
+      .sort((a,b)=>order[a.severity]-order[b.severity]);
+    if(!rows.length) continue;
+    html+=`<section class="mod"><h3>${mod}</h3>`;
+    for(const f of rows){
+      const loc = f.page>0 ? `p${f.page}` : esc(f.text||"");
+      html+=`<div class="find">
+        <span class="sev ${f.severity.toLowerCase()}">${f.severity}</span>
+        <div class="body"><span class="k">${esc(f.kind)}</span><span class="loc">${loc}</span>
+          <div class="d">${esc(f.detail)}</div></div></div>`;
+    }
+    html+=`</section>`;
+  }
+  show(html);
+}
+</script>
+</body>
+</html>

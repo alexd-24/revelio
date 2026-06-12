@@ -58,6 +58,18 @@ python make_test.py                       # regenerate a planted test fixture
 Exit code is 1 when findings exist, 0 when clean — drop it into CI or a
 pre-send hook.
 
+### Web UI
+
+Prefer drag-and-drop? Run the local server and open the page:
+
+```bash
+python serve.py        # then visit http://127.0.0.1:8000
+```
+
+It runs entirely on your machine — the PDF never leaves it — and uses only the
+standard library (no extra install). Drop a PDF in and the four modules' findings
+render grouped by module and severity.
+
 ## Honest limits
 
 "Clean" means *nothing was found*, not *verified safe*. The hidden-text checks
